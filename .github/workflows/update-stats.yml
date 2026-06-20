@@ -11,7 +11,7 @@ name: update-stats
 
 on:
   schedule:
-    - cron: '*/30 * * * *'   # cada 30 min (UTC). Telegram delega el resto.
+    - cron: '*/5 * * * *'   # cada 5 min (UTC). Telegram delega el resto.
   workflow_dispatch: {}      # botón "Run workflow" para forzar una ejecución manual.
 
 # Solo escritura sobre el propio repo; ningún otro permiso.
