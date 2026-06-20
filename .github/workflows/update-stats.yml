@@ -1,0 +1,158 @@
+name: update-stats
+
+# ───────────────────────────────────────────────────────────────────────────────────────────
+# Pilot Network · Live member stats
+# Consulta getChatMemberCount de los 4 bots de Telegram y publica:
+#   - stats.json    (valores actuales, lo que lee el embed de Webador)
+#   - history.json  (1 snapshot/día, para el delta "esta semana" y el sparkline)
+# Repo NUEVO y AISLADO. No depende de feedbacks / jobs-board / Supabase / PythonAnywhere.
+# Coste: 0 € (repo público => minutos de Actions ilimitados + GitHub Pages gratis).
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # cada 30 min (UTC). Telegram delega el resto.
+  workflow_dispatch: {}      # botón "Run workflow" para forzar una ejecución manual.
+
+# Solo escritura sobre el propio repo; ningún otro permiso.
+permissions:
+  contents: write
+
+# Evita que dos ejecuciones se pisen si una se retrasa.
+concurrency:
+  group: update-stats
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Fetch member counts and build JSON
+        env:
+          # Los tokens REALES se configuran como GitHub Secrets del repo (Settings > Secrets).
+          # Nunca se escriben en el código. Estos 4 son los nombres de los secrets.
+          TOKEN_ES: ${{ secrets.TOKEN_ES }}
+          TOKEN_EU: ${{ secrets.TOKEN_EU }}
+          TOKEN_SENASA: ${{ secrets.TOKEN_SENASA }}
+          TOKEN_CABIN: ${{ secrets.TOKEN_CABIN }}
+        run: |
+          python - <<'PY'
+          import json, os, sys, time, datetime, urllib.request, urllib.error
+
+          # ── Mapa canal -> (token desde secret, @username público del canal) ──
+          CHANNELS = {
+              "es":     {"token": os.environ.get("TOKEN_ES", ""),     "username": "pilotnetworkspain"},
+              "eu":     {"token": os.environ.get("TOKEN_EU", ""),     "username": "pilotnetworkeurope"},
+              "senasa": {"token": os.environ.get("TOKEN_SENASA", ""), "username": "pilotnetworksenasaustro"},
+              "cabin":  {"token": os.environ.get("TOKEN_CABIN", ""),  "username": "cabinnetwork"},
+          }
+
+          # Valores de seguridad por si NO existe stats.json previo (primer arranque)
+          # y un canal falla a la vez: nunca se publica un 0.
+          SEED = {"es": 5000, "eu": 3500, "senasa": 1000, "cabin": 900}
+
+          def load_json(path, default):
+              try:
+                  with open(path, encoding="utf-8") as f:
+                      return json.load(f)
+              except Exception:
+                  return default
+
+          prev = load_json("stats.json", {})
+          prev_channels = prev.get("channels", {}) if isinstance(prev, dict) else {}
+
+          def last_known(key):
+              # Último valor bueno conocido, o la semilla si nunca hubo dato.
+              v = prev_channels.get(key, {})
+              return int(v.get("members") or SEED[key])
+
+          def get_count(token, username):
+              if not token:
+                  raise RuntimeError("token vacío")
+              url = "https://api.telegram.org/bot%s/getChatMemberCount?chat_id=@%s" % (token, username)
+              with urllib.request.urlopen(url, timeout=20) as r:
+                  payload = json.loads(r.read().decode("utf-8"))
+              if not payload.get("ok"):
+                  raise RuntimeError("respuesta no-ok de Telegram")
+              return int(payload["result"])
+
+          channels = {}
+          changed = False
+          for key, cfg in CHANNELS.items():
+              try:
+                  count = get_count(cfg["token"], cfg["username"])
+              except Exception as e:
+                  # FALLBACK A NIVEL DE DATOS: si un canal falla, conservamos su
+                  # último valor bueno en vez de regresar a 0 (sin imprimir el token).
+                  count = last_known(key)
+                  print("WARN %s: usando último valor conocido (%d). Motivo: %s" % (key, count, e))
+              if count != int(prev_channels.get(key, {}).get("members") or -1):
+                  changed = True
+              channels[key] = {"members": count, "username": cfg["username"]}
+              time.sleep(0.4)  # cortesía con la Bot API (no hace falta, pero por higiene)
+
+          total = sum(c["members"] for c in channels.values())
+          now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+          stats = {
+              "updated_at": now.isoformat().replace("+00:00", "Z"),
+              "total_members": total,
+              "channels": channels,
+          }
+
+          # ── Histórico: 1 entrada por día (se actualiza la del día en curso) ──
+          history = load_json("history.json", [])
+          if not isinstance(history, list):
+              history = []
+          today = now.date().isoformat()
+          entry = {"date": today, "total": total,
+                   **{k: v["members"] for k, v in channels.items()}}
+          new_day = False
+          if history and history[-1].get("date") == today:
+              if history[-1] != entry:
+                  history[-1] = entry
+                  changed = True
+          else:
+              history.append(entry)
+              new_day = True
+              changed = True
+          history = history[-120:]  # ~4 meses; el sparkline solo usa los últimos ~14.
+
+          if not changed:
+              print("Sin cambios en los conteos; no se commitea.")
+              # Marcador para el step de commit.
+              with open(".nochange", "w") as f:
+                  f.write("1")
+              sys.exit(0)
+
+          with open("stats.json", "w", encoding="utf-8") as f:
+              json.dump(stats, f, ensure_ascii=False, indent=2)
+          with open("history.json", "w", encoding="utf-8") as f:
+              json.dump(history, f, ensure_ascii=False, indent=2)
+
+          print("OK total=%d  por_canal=%s  nuevo_dia=%s" %
+                (total, {k: v["members"] for k, v in channels.items()}, new_day))
+          PY
+
+      - name: Commit if changed
+        run: |
+          if [ -f .nochange ]; then
+            echo "Nada que commitear."
+            exit 0
+          fi
+          git config user.name  "pn-stats-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add stats.json history.json
+          if git diff --cached --quiet; then
+            echo "Sin diferencias reales."
+            exit 0
+          fi
+          git commit -m "stats: update member counts ($(date -u +%Y-%m-%dT%H:%MZ))"
+          git push
