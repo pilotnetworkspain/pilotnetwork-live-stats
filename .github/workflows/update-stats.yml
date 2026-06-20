@@ -21,7 +21,7 @@ permissions:
 # Evita que dos ejecuciones se pisen si una se retrasa.
 concurrency:
   group: update-stats
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   update:
