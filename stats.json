@@ -1,9 +1,9 @@
 {
-  "updated_at": "2026-07-29T09:46:35Z",
+  "updated_at": "2026-07-29T11:49:25Z",
   "total_members": 11564,
   "channels": {
     "es": {
-      "members": 5443,
+      "members": 5444,
       "username": "pilotnetworkspain"
     },
     "eu": {
@@ -15,7 +15,7 @@
       "username": "pilotnetworksenasaustro"
     },
     "cabin": {
-      "members": 1051,
+      "members": 1050,
       "username": "cabinnetwork"
     }
   }
