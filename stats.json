@@ -1,21 +1,21 @@
 {
-  "updated_at": "2026-11-09T08:43:59Z",
-  "total_members": 13472,
+  "updated_at": "2026-11-09T19:09:14Z",
+  "total_members": 13479,
   "channels": {
     "es": {
-      "members": 6076,
+      "members": 6079,
       "username": "pilotnetworkspain"
     },
     "eu": {
-      "members": 5126,
+      "members": 5130,
       "username": "pilotnetworkeurope"
     },
     "senasa": {
-      "members": 1063,
+      "members": 1064,
       "username": "pilotnetworksenasaustro"
     },
     "cabin": {
-      "members": 1207,
+      "members": 1206,
       "username": "cabinnetwork"
     }
   }
